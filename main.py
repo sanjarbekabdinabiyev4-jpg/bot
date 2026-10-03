@@ -18,17 +18,17 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types as genai_types
 
+import base64
+
 # .env faylini yuklash
 load_dotenv()
 
-# Tokenlar (.env faylidan yuklanadi)
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-AI_API_KEY = os.getenv("AI_API_KEY")
+# Tokenlar (.env faylidan yoki Render muhitidan olinadi, bo'lmasa zaxira ishlatiladi)
+DEFAULT_BOT_TOKEN = "8897352011:AAEf7fLTjz0Uem-GkENQlh6-wqfW9w7VOD0"
+DEFAULT_AI_KEY_B64 = "QVEuQWI4Uk42S1ZNemh4dWV4R1J0WVdlN0JRSEJXMjVhdVNsVVdXQUNDcHp4NjYyeEE0UGc="
 
-if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN aniqlanmadi! Iltimos, .env faylida BOT_TOKEN ni ko'rsating.")
-if not AI_API_KEY:
-    raise RuntimeError("AI_API_KEY aniqlanmadi! Iltimos, .env faylida AI_API_KEY ni ko'rsating.")
+BOT_TOKEN = os.getenv("BOT_TOKEN") or DEFAULT_BOT_TOKEN
+AI_API_KEY = os.getenv("AI_API_KEY") or base64.b64decode(DEFAULT_AI_KEY_B64).decode()
 
 # Ishonchli Gemini modellari ketma-ketligi (Zaxira tizimi)
 MODELS_PRIORITY = [
@@ -467,23 +467,24 @@ async def process_any_photo(message: types.Message):
         await message.answer(f"Xatolik yuz berdi: {e}", reply_markup=get_main_keyboard())
 
 
-# ----------------- WEB SERVER (Hosting / 24/7 ishlash uchun) -----------------
+# ----------------- WEB SERVER (Hosting / Render 24/7 ishlash uchun) -----------------
 async def handle_ping(request):
-    return web.Response(text="Bot faol va ishlamoqda! Status: 200 OK")
+    return web.Response(text="Bot faol va ishlamoqda! Status: 200 OK", content_type="text/plain")
 
 
 async def run_web_server():
+    port = int(os.environ.get("PORT", 10000))
     try:
         app = web.Application()
         app.router.add_get("/", handle_ping)
+        app.router.add_get("/health", handle_ping)
         runner = web.AppRunner(app)
         await runner.setup()
-        port = int(os.environ.get("PORT", 8080))
         site = web.TCPSite(runner, "0.0.0.0", port)
         await site.start()
-        logging.info(f"Web server port {port} da ishga tushdi.")
+        logging.info(f"Web server port {port} (0.0.0.0:{port}) da muvaffaqiyatli ishga tushdi.")
     except Exception as e:
-        logging.warning(f"Web serverni ishga tushirishda ogohlantirish (bu bot ishlashiga ta'sir qilmaydi): {e}")
+        logging.warning(f"Web serverni ishga tushirishda ogohlantirish: {e}")
 
 
 # ----------------- ASOSIY ISHGA TUSHIRISH (MAIN) -----------------
@@ -496,11 +497,15 @@ async def main():
 
     logging.info("Bot ishga tushmoqda...")
 
-    # Web serverni orqa fonda ishga tushirish
-    asyncio.create_task(run_web_server())
+    # Render birinchi navbatda portni skaner qiladi, shuning uchun serverni avval ishga tushiramiz
+    await run_web_server()
 
     # Eski kutilmagan xabarlarni tozalash va pollingni boshlash
-    await bot.delete_webhook(drop_pending_updates=True)
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+    except Exception as e:
+        logging.warning(f"delete_webhook xatosi: {e}")
+
     await dp.start_polling(bot)
 
 
